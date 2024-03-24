@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +8,7 @@ from models import register
 
 
 def generate_meshgrid(height, width):
-    """generate meshgrid with shape [height*width, 2]"""
+    """generate meshgrid (type: torch.tensor) with shape [height * width, 2]"""
     # Generate all pixel coordinates for the given image dimensions
     y_coords, x_coords = torch.arange(0, height), torch.arange(0, width)
     # Create a grid of coordinates
@@ -25,32 +23,29 @@ def fetching_features_from_tensor(image_tensor, input_coords):
     """Querying the value at the specified coordinates of the tensor"""
     # Assumption: image_tensor is of shape [batch, channel, height, width]
     #             input_coords is of shape [N, 2], where each row is (x, y)
-    batch_size = image_tensor.shape[0]
-    # Normalising pixel coordinates to [-1, 1] for grid_sample
-    if not isinstance(input_coords, torch.Tensor):
-        input_coords = torch.tensor(input_coords, dtype=torch.float32)
+    # normalising pixel coordinates [-1,1]
     input_coords = input_coords.to(image_tensor.device)
-    coords = input_coords.float()
-    coords[:, 0] = (coords[:, 0] / (image_tensor.shape[-1] - 1)) * 2.0 - 1.0
-    coords[:, 1] = (coords[:, 1] / (image_tensor.shape[-2] - 1)) * 2.0 - 1.0
-    # Create a batched grid with Batch and Channel dimensions as 1
-    grid = coords.unsqueeze(0).unsqueeze(0)
-    grid = grid.expand(batch_size, -1, -1, -1)
-    grid = grid.to(image_tensor.device)
-    color_values_tensor = torch.nn.functional.grid_sample(
-        image_tensor, grid, mode='bilinear', padding_mode='border', align_corners=True)
-    # Squeeze to remove the output spatial dimensions, now the shape is [batch, channel, N]
-    color_values_tensor = color_values_tensor.squeeze(2).squeeze(2)
-    # Transpose the dimensions to [batch, N, channel]
-    color_values_tensor = color_values_tensor.permute(0, 2, 1)
+    coords = input_coords / torch.tensor([image_tensor.shape[-2], image_tensor.shape[-1]],
+                                         device=image_tensor.device).float()
+    center_coords_normalized = torch.tensor([0.5, 0.5], device=image_tensor.device).float()
+    coords = (center_coords_normalized - coords) * 2.0
 
-    return color_values_tensor, coords
+    # Fetching the colour of the pixels in each coordinates
+    batch_size = image_tensor.shape[0]
+    input_coords_expanded = input_coords.unsqueeze(0).expand(batch_size, -1, -1)
+
+    y_coords = input_coords_expanded[..., 0].long()
+    x_coords = input_coords_expanded[..., 1].long()
+    batch_indices = torch.arange(batch_size).view(-1, 1).to(input_coords.device)
+
+    color_values = image_tensor[batch_indices, :, x_coords, y_coords]
+
+    return color_values, coords
 
 
 @register('gaussiansplatter')
 class GaussianSplatter(nn.Module):
-    def __init__(self, encoder_spec, kernel_size, num_points):
-
+    def __init__(self, encoder_spec, kernel_size, num_row_points=48, num_column_points=48):
         super(GaussianSplatter, self).__init__()
 
         self.feat = None
@@ -59,35 +54,48 @@ class GaussianSplatter(nn.Module):
 
         # key parameter in GaussianSplatter
         self.kernel_size = kernel_size
-        self.root = round(math.sqrt(num_points))
-        if num_points != self.root * self.root:
-            raise ValueError("num_points must be a square number")
-        self.num_points = num_points
+        self.row = num_row_points
+        self.column = num_column_points  # Initialize a gaussian point grid
+        self.num_points = num_column_points * num_row_points
+
         self.sigma_x = None  # std in x-axis
         self.sigma_y = None  # std in y-axis
         self.coords = None   # coord of LR, shape=[num_points, 2], each element in batch share the same coords
-        self.colors = None   # color(feature) of LR, shape=[batch, num_points, channel of LR feature]
-        self.alpha = None    # transparency of color(feature), shape=[num_points, 1], each element in batch share the same coords
+        self.opacity = None  # transparency of feature, shape=[num_points, 1], each element in batch share the same opacity
 
     def gen_feat(self, inp):
-        self.feat = self.encoder(inp)  # self.feat.shape = [Batch, 64, 48, 48]
+        self.feat = self.encoder(inp)  # self.feat.shape = [Batch, Channel, Height, Width]
         return self.feat
 
-    def LR_initialization(self):
-        # Initialized using LR image
-        if self.feat is None:
-            raise ValueError("must be applied after def gen_feat")
-
-        length = self.feat.shape[-2] * self.feat.shape[-1]
-        sigma_values = 0.5 * torch.ones(length, 2)
+    def initialization(self):
+        # Initialization
+        sigma_values = 0.5 * torch.ones(self.row * self.column, 2)
         self.sigma_x, self.sigma_y = sigma_values[:, 0], sigma_values[:, 1]
-        self.alpha = torch.ones(length, 1)
+        self.opacity = torch.ones(self.row * self.column, 1)
 
-        # 4 trainable parameters: colors(feature), sigma_x, sigma_y, alpha
-        # self.colors = nn.Parameter(self.colors)
+        # 3 trainable parameters: sigma_x, sigma_y, opacity
         self.sigma_x = nn.Parameter(self.sigma_x)
         self.sigma_y = nn.Parameter(self.sigma_y)
-        self.alpha = nn.Parameter(self.alpha)
+        self.opacity = nn.Parameter(self.opacity)
+
+    def expand_features(self):
+        """Replicates and rearranges feature attributes of 2d gaussian grid to fit the input spatial domain
+        at arbitrary scales and maintaining the original pattern by indexing using modular arithmetic."""
+        new_row, new_column = self.feat.shape[-2], self.feat.shape[-1]
+
+        # Generate expanded row/column indices for the new domain by wrapping around the original number of rows/columns
+        expanded_row_indices = torch.arange(new_row) % self.row
+        expanded_column_indices = torch.arange(new_column) % self.column
+
+        # Compute a 2D grid of indices that map the new domain back to the original domain
+        expanded_indices = expanded_row_indices.unsqueeze(1) * self.column + expanded_column_indices
+        expanded_indices_flat = expanded_indices.view(-1)
+
+        expanded_sigma_x = self.sigma_x[expanded_indices_flat]
+        expanded_sigma_y = self.sigma_y[expanded_indices_flat]
+        expanded_opacity = self.opacity[expanded_indices_flat]
+
+        return expanded_sigma_x, expanded_sigma_y, expanded_opacity
 
     def forward(self, inp):
         """
@@ -101,16 +109,17 @@ class GaussianSplatter(nn.Module):
         self.gen_feat(inp)
         image_size = self.feat.shape
         if self.coords is None:
-            self.LR_initialization()
-        coords_ = generate_meshgrid(self.root, self.root)
-        self.colors, self.coords = fetching_features_from_tensor(self.feat, coords_)
+            self.initialization()
+        coords_ = generate_meshgrid(self.feat.shape[-2], self.feat.shape[-1])
+        num_feature_points = self.feat.shape[-2] * self.feat.shape[-1]
+        colors_, self.coords = fetching_features_from_tensor(self.feat, coords_)
 
-        if image_size[0] != self.colors.shape[0] or image_size[1] != self.colors.shape[-1]:
-            raise ValueError("Batch/Channel size of colors does not match the image size.")
         batch_size, channel, _, _ = image_size
-        gaussian_point_num = self.colors.shape[1]
-        sigma_x = self.sigma_x.view(gaussian_point_num, 1, 1)
-        sigma_y = self.sigma_y.view(gaussian_point_num, 1, 1)
+        # Spread Gaussian points over the whole feature map
+        expanded_sigma_x, expanded_sigma_y, expanded_opacity = self.expand_features()
+
+        sigma_x = expanded_sigma_x.view(num_feature_points, 1, 1)
+        sigma_y = expanded_sigma_y.view(num_feature_points, 1, 1)
         covariance = torch.stack(
             [torch.stack([sigma_x ** 2, torch.zeros(sigma_x.shape)], dim=-1),
              torch.stack([torch.zeros(sigma_x.shape), sigma_y ** 2], dim=-1)], dim=-2
@@ -134,15 +143,15 @@ class GaussianSplatter(nn.Module):
         xy = torch.stack([xx, yy], dim=-1)
         z = torch.einsum('b...i,b...ij,b...j->b...', xy, -0.5 * inv_covariance, xy)
         kernel = torch.exp(z) / (
-                2 * torch.tensor(np.pi, device=device) * torch.sqrt(torch.det(covariance)).to(device).view(gaussian_point_num, 1, 1))
+                2 * torch.tensor(np.pi, device=device) * torch.sqrt(torch.det(covariance)).to(device).view(num_feature_points, 1, 1))
 
         kernel_max_1, _ = kernel.max(dim=-1, keepdim=True)  # Find max along the last dimension
         kernel_max_2, _ = kernel_max_1.max(dim=-2, keepdim=True)  # Find max along the second-to-last dimension
         kernel_normalized = kernel / kernel_max_2
 
-        kernel_reshaped = kernel_normalized.repeat(1, channel, 1).view(gaussian_point_num * channel, self.kernel_size,
+        kernel_reshaped = kernel_normalized.repeat(1, channel, 1).view(num_feature_points * channel, self.kernel_size,
                                                                        self.kernel_size)
-        kernel_color = kernel_reshaped.unsqueeze(0).reshape(gaussian_point_num, channel, self.kernel_size, self.kernel_size)
+        kernel_color = kernel_reshaped.unsqueeze(0).reshape(num_feature_points, channel, self.kernel_size, self.kernel_size)
 
         # Calculating the padding needed to match the image size
         pad_h = image_size[-2] - self.kernel_size
@@ -170,7 +179,7 @@ class GaussianSplatter(nn.Module):
         grid = F.affine_grid(theta, size=[b, c, h, w], align_corners=True)
         kernel_color_padded_translated = F.grid_sample(kernel_color_padded, grid, align_corners=True)
         kernel_color_padded_translated = kernel_color_padded_translated.unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
-        colors = self.colors * self.alpha.to(device).unsqueeze(0).expand(batch_size, -1, -1)
+        colors = colors_ * expanded_opacity.to(device).unsqueeze(0).expand(batch_size, -1, -1)
         color_values_reshaped = colors.unsqueeze(-1).unsqueeze(-1)
 
         final_image_layers = color_values_reshaped * kernel_color_padded_translated
