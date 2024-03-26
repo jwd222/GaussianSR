@@ -1,0 +1,1 @@
+python3 train_liif.py --config ./configs/train-div2k/train_edsr-baseline-gaussian-batch32.yaml --gpu 0,1,2,3,4,5,6,7
