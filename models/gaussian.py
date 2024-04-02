@@ -44,7 +44,7 @@ def fetching_features_from_tensor(image_tensor, input_coords):
 
 
 @register('gaussiansplatter')
-class GaussianSplatter(nn.Module):
+class GaussianSplatter:
     def __init__(self, encoder_spec, kernel_size, num_row_points=48, num_column_points=48):
         super(GaussianSplatter, self).__init__()
 
