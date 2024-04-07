@@ -10,7 +10,7 @@ from utils import make_coord
 @register('liif')
 class LIIF(nn.Module):
 
-    def __init__(self, gaussian_spec, imnet_spec=None,
+    def __init__(self, encoder_spec, gaussian_spec, imnet_spec=None,
                  local_ensemble=True, feat_unfold=True, cell_decode=True):
         super().__init__()
         self.feat = None
@@ -18,11 +18,11 @@ class LIIF(nn.Module):
         self.feat_unfold = feat_unfold
         self.cell_decode = cell_decode
 
-        # self.encoder = models.make(encoder_spec)
+        self.encoder = models.make(encoder_spec)
         self.gaussian = models.make(gaussian_spec)
 
         if imnet_spec is not None:
-            imnet_in_dim = self.gaussian.out_dim
+            imnet_in_dim = self.encoder.out_dim
             if self.feat_unfold:
                 imnet_in_dim *= 9
             imnet_in_dim += 2  # attach coord
@@ -33,7 +33,7 @@ class LIIF(nn.Module):
             self.imnet = None
 
     def gen_feat(self, inp):
-        self.feat = self.gaussian(inp)
+        self.feat = self.gaussian(self.encoder(inp))
         return self.feat
 
     def query_rgb(self, coord, cell=None):
