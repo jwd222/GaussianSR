@@ -1,30 +1,9 @@
-# LIIF
-
-This repository contains the official implementation for LIIF introduced in the following paper:
-
-[**Learning Continuous Image Representation with Local Implicit Image Function**](https://arxiv.org/abs/2012.09161)
-<br>
-[Yinbo Chen](https://yinboc.github.io/), [Sifei Liu](https://www.sifeiliu.net/), [Xiaolong Wang](https://xiaolonw.github.io/)
-<br>
-CVPR 2021 (Oral)
-
-The project page with video is at https://yinboc.github.io/liif/.
-
-<img src="https://user-images.githubusercontent.com/10364424/102488232-b3c96080-40a6-11eb-905f-a1a21b7c6f8a.png" width="200">
-
-### Citation
-
-If you find our work useful in your research, please cite:
-
-```
-@inproceedings{chen2021learning,
-  title={Learning continuous image representation with local implicit image function},
-  author={Chen, Yinbo and Liu, Sifei and Wang, Xiaolong},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-  pages={8628--8638},
-  year={2021}
-}
-```
+# GaussianSR: High Fidelity 2D Gaussian Splatting for Arbitrary-Scale Image Super-Resolution
+[![](https://img.shields.io/badge/Dataset-🔰DIV2K-blue.svg)](https://data.vision.ee.ethz.ch/cvl/DIV2K/) [![](https://img.shields.io/badge/Dataset-🔰Set5-blue.svg)](https://cv.snu.ac.kr/research/EDSR/benchmark.tar) [![](https://img.shields.io/badge/Dataset-🔰BSD100-blue.svg)](https://cv.snu.ac.kr/research/EDSR/benchmark.tar) [![](https://img.shields.io/badge/Dataset-🔰Urban100-blue.svg)](https://cv.snu.ac.kr/research/EDSR/benchmark.tar) [![](https://img.shields.io/badge/Dataset-🔰General100-blue.svg)](https://drive.google.com/drive/folders/1satiNXA73tksZjormVquIlsdbhMVdq2M?usp=drive_link) [![](https://img.shields.io/badge/Dataset-🔰Manga109-blue.svg)](https://drive.google.com/drive/folders/1k2GriT5t3wh9T4Hi4J1OELL83dsM4Z_o?usp=drive_link)
+***
+>**Abstract**: _Implicit neural representations (INRs) have revolutionized arbitrary-scale super-resolution (ASSR) by modeling images as continuous functions. However, existing INR-based ASSR methods discretely store latent codes, neglecting the continuous nature of image intensity variations and lacking interpretability of latent representations. This paper proposes a novel and elegant ASSR paradigm called GaussianSR that addresses these limitations through 2D Gaussian Splatting (2DGS). Instead of treating pixels as discrete points, GaussianSR models each pixel as a continuous Gaussian field. A classifier is trained to assign learnable Gaussian kernels with adaptive variances and opacities to each pixel, accommodating diverse input characteristics. By applying 2DGS to the encoder features, they are reorganized into a continuous field capturing inherent intensity variations. GaussianSR achieves flexible, adaptive receptive fields through mutually stacked Gaussian kernels, effectively capturing multi-scale features and long-range dependencies. Extensive experiments demonstrate that GaussianSR yields superior performance with reduced parameters, underscoring the great capability of our pipeline._
+>
+![image](https://github.com/tljxyys/Perspective-Unet/blob/main/fig/model_architecture.png)
 
 ### Environment
 - Python 3
