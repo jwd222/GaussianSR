@@ -1,5 +1,4 @@
-""" Train for generating LIIF, from image to implicit representation.
-
+""" Train GaussianSR
     Config:
         train_dataset:
           dataset: $spec; wrapper: $spec; batch_size:
@@ -46,17 +45,18 @@ def make_data_loader(spec, tag=''):
 
     log('{} dataset: size={}'.format(tag, len(dataset)))
     for k, v in dataset[0].items():
-        log('  {}: shape={}'.format(k, tuple(v.shape)))
+        if not isinstance(v, float):
+            log('  {}: shape={}'.format(k, tuple(v.shape)))
 
     loader = DataLoader(dataset, batch_size=spec['batch_size'],
                         shuffle=(tag == 'train'), num_workers=8, pin_memory=True)
-    return loader
+    return loader, dataset
 
 
 def make_data_loaders():
-    train_loader = make_data_loader(config.get('train_dataset'), tag='train')
-    val_loader = make_data_loader(config.get('val_dataset'), tag='val')
-    return train_loader, val_loader
+    train_loader, train_dataset = make_data_loader(config.get('train_dataset'), tag='train')
+    val_loader, val_dataset = make_data_loader(config.get('val_dataset'), tag='val')
+    return train_loader, val_loader, train_dataset, val_dataset
 
 
 def prepare_training():
@@ -64,7 +64,7 @@ def prepare_training():
         sv_file = torch.load(config['resume'])
         model = models.make(sv_file['model'], load_sd=True).cuda()
         optimizer = utils.make_optimizer(
-            model.parameters(), sv_file['optimizer'], load_sd=True)
+            model.parameters(), sv_file['optimizer'], load_sd=True)  #
         epoch_start = sv_file['epoch'] + 1
         if config.get('multi_step_lr') is None:
             lr_scheduler = None
@@ -75,7 +75,7 @@ def prepare_training():
     else:
         model = models.make(config['model']).cuda()
         optimizer = utils.make_optimizer(
-            model.parameters(), config['optimizer'])
+            model.parameters(), config['optimizer'])  #
         epoch_start = 1
         if config.get('multi_step_lr') is None:
             lr_scheduler = None
@@ -104,11 +104,10 @@ def train(train_loader, model, optimizer):
             batch[k] = v.cuda()
 
         inp = (batch['inp'] - inp_sub) / inp_div
-        pred = model(inp, batch['coord'], batch['cell'])
+        pred = model(inp, batch['coord'], batch['scale'], batch['cell'])
 
         gt = (batch['gt'] - gt_sub) / gt_div
         loss = loss_fn(pred, gt)
-
         train_loss.add(loss.item())
 
         optimizer.zero_grad()
@@ -128,7 +127,7 @@ def main(config_, save_path):
     with open(os.path.join(save_path, 'config.yaml'), 'w') as f:
         yaml.dump(config, f, sort_keys=False)
 
-    train_loader, val_loader = make_data_loaders()
+    train_loader, val_loader, train_dataset, val_dataset = make_data_loaders()
     if config.get('data_norm') is None:
         config['data_norm'] = {
             'inp': {'sub': [0], 'div': [1]},
@@ -151,10 +150,10 @@ def main(config_, save_path):
     for epoch in range(epoch_start, epoch_max + 1):
         t_epoch_start = timer.t()
         log_info = ['epoch {}/{}'.format(epoch, epoch_max)]
-
         writer.add_scalar('lr', optimizer.param_groups[0]['lr'], epoch)
 
         train_loss = train(train_loader, model, optimizer)
+
         if lr_scheduler is not None:
             lr_scheduler.step()
 
@@ -212,7 +211,7 @@ if __name__ == '__main__':
     parser.add_argument('--config')
     parser.add_argument('--name', default=None)
     parser.add_argument('--tag', default=None)
-    parser.add_argument('--gpu', default='1,2')
+    parser.add_argument('--gpu', default='0,1,2,3')
     args = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
