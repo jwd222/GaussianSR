@@ -3,8 +3,10 @@
 ***
 >**Abstract**: _Implicit neural representations (INRs) have revolutionized arbitrary-scale super-resolution (ASSR) by modeling images as continuous functions. However, existing INR-based ASSR methods discretely store latent codes, neglecting the continuous nature of image intensity variations and lacking interpretability of latent representations. This paper proposes a novel and elegant ASSR paradigm called GaussianSR that addresses these limitations through 2D Gaussian Splatting (2DGS). Instead of treating pixels as discrete points, GaussianSR models each pixel as a continuous Gaussian field. A classifier is trained to assign learnable Gaussian kernels with adaptive variances and opacities to each pixel, accommodating diverse input characteristics. By applying 2DGS to the encoder features, they are reorganized into a continuous field capturing inherent intensity variations. GaussianSR achieves flexible, adaptive receptive fields through mutually stacked Gaussian kernels, effectively capturing multi-scale features and long-range dependencies. Extensive experiments demonstrate that GaussianSR yields superior performance with reduced parameters, underscoring the great capability of our pipeline._
 >
-![image](https://github.com/tljxyys/Perspective-Unet/blob/main/fig/model_architecture.png)
-
+![image](![image](https://github.com/tljxyys/GaussianSR/blob/main/fig/Figure_1.png))
+***
+![image](![image](https://github.com/tljxyys/GaussianSR/blob/main/fig/Figure_2.png))
+***
 ### Environment
 - Python 3
 - Pytorch 1.6.0
