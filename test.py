@@ -11,9 +11,23 @@ from tqdm import tqdm
 import datasets
 import models
 import utils
+from utils import make_coord
+torch.backends.cudnn.enabled = False
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:2048'
 
 
-def batched_predict(model, inp, coord, cell, bsize):
+def make_coord_and_cell(img, scale):
+    scale = int(scale)
+    h, w = img.shape[-2:]
+    h, w = h * scale, w * scale
+    coord = make_coord((h, w)).cuda()
+    cell = torch.ones_like(coord)
+    cell[:, 0] *= 2 / h
+    cell[:, 1] *= 2 / w
+    return coord.unsqueeze(0), cell.unsqueeze(0)
+
+
+def batched_predict(model, inp, coord, scale, cell, bsize):
     with torch.no_grad():
         model.gen_feat(inp)
         n = coord.shape[1]
@@ -21,7 +35,7 @@ def batched_predict(model, inp, coord, cell, bsize):
         preds = []
         while ql < n:
             qr = min(ql + bsize, n)
-            pred = model.query_rgb(coord[:, ql: qr, :], cell[:, ql: qr, :])
+            pred = model.query_rgb(coord[:, ql: qr, :].contiguous(), scale.contiguous(), cell[:, ql: qr, :].contiguous())
             preds.append(pred)
             ql = qr
         pred = torch.cat(preds, dim=1)
@@ -29,7 +43,7 @@ def batched_predict(model, inp, coord, cell, bsize):
 
 
 def eval_psnr(loader, model, data_norm=None, eval_type=None, eval_bsize=None,
-              verbose=False):
+              verbose=False, scale_max=4, window_size=0):
     model.eval()
 
     if data_norm is None:
@@ -63,23 +77,50 @@ def eval_psnr(loader, model, data_norm=None, eval_type=None, eval_bsize=None,
             batch[k] = v.cuda()
 
         inp = (batch['inp'] - inp_sub) / inp_div
+        # SwinIR Evaluation - reflection padding
+        if window_size != 0:
+            _, _, h_old, w_old = inp.size()
+            h_pad = (h_old // window_size + 1) * window_size - h_old
+            w_pad = (w_old // window_size + 1) * window_size - w_old
+            inp = torch.cat([inp, torch.flip(inp, [2])], 2)[:, :, :h_old + h_pad, :]
+            inp = torch.cat([inp, torch.flip(inp, [3])], 3)[:, :, :, :w_old + w_pad]
+            
+            coord = utils.make_coord((scale*(h_old+h_pad), scale*(w_old+w_pad))).unsqueeze(0).cuda()
+            cell = torch.ones_like(coord)
+            cell[:, :, 0] *= 2 / inp.shape[-2] / scale
+            cell[:, :, 1] *= 2 / inp.shape[-1] / scale
+        else:
+            h_pad = 0
+            w_pad = 0
+            
+            coord = batch['coord']
+            cell = batch['cell']
+        
         if eval_bsize is None:
             with torch.no_grad():
-                pred = model(inp, batch['coord'], batch['cell'])
+                pred = model(inp, batch['coord'], batch['scale'], batch['cell'])
         else:
-            pred = batched_predict(model, inp,
-                                   batch['coord'], batch['cell'], eval_bsize)
+            pred = batched_predict(model, inp, batch['coord'], batch['scale'], batch['cell'], eval_bsize)
+
         pred = pred * gt_div + gt_sub
         pred.clamp_(0, 1)
 
         if eval_type is not None:  # reshape for shaving-eval
+        # gt reshape
             ih, iw = batch['inp'].shape[-2:]
             s = math.sqrt(batch['coord'].shape[1] / (ih * iw))
             shape = [batch['inp'].shape[0], round(ih * s), round(iw * s), 3]
-            pred = pred.view(*shape) \
-                .permute(0, 3, 1, 2).contiguous()
             batch['gt'] = batch['gt'].view(*shape) \
                 .permute(0, 3, 1, 2).contiguous()
+            
+            # prediction reshape
+            ih += h_pad
+            iw += w_pad
+            s = math.sqrt(coord.shape[1] / (ih * iw))
+            shape = [batch['inp'].shape[0], round(ih * s), round(iw * s), 3]
+            pred = pred.view(*shape) \
+                .permute(0, 3, 1, 2).contiguous()
+            pred = pred[..., :batch['gt'].shape[-2], :batch['gt'].shape[-1]]
 
         res = metric_fn(pred, batch['gt'])
         val_res.add(res.item(), inp.shape[0])
@@ -88,32 +129,4 @@ def eval_psnr(loader, model, data_norm=None, eval_type=None, eval_bsize=None,
             pbar.set_description('val {:.4f}'.format(val_res.item()))
 
     return val_res.item()
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config')
-    parser.add_argument('--model')
-    parser.add_argument('--gpu', default='1')
-    args = parser.parse_args()
-
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-
-    with open(args.config, 'r') as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-
-    spec = config['test_dataset']
-    dataset = datasets.make(spec['dataset'])
-    dataset = datasets.make(spec['wrapper'], args={'dataset': dataset})
-    loader = DataLoader(dataset, batch_size=spec['batch_size'],
-                        num_workers=8, pin_memory=True)
-
-    model_spec = torch.load(args.model)['model']
-    model = models.make(model_spec, load_sd=True).cuda()
-
-    res = eval_psnr(loader, model,
-                    data_norm=config.get('data_norm'),
-                    eval_type=config.get('eval_type'),
-                    eval_bsize=config.get('eval_bsize'),
-                    verbose=True)
-    print('result: {:.4f}'.format(res))
+                  
