@@ -6,13 +6,22 @@ from models import register
 @register('mlp')
 class MLP(nn.Module):
 
-    def __init__(self, in_dim, out_dim, hidden_list):
+    def __init__(self, in_dim, out_dim, hidden_list, act='gelu'):
         super().__init__()
+        if act is None:
+            self.act = None
+        elif act.lower() == 'relu':
+            self.act = nn.ReLU()
+        elif act.lower() == 'gelu':
+            self.act = nn.GELU()
+        else:
+            assert False, f'activation {act} is not supported'
         layers = []
         lastv = in_dim
         for hidden in hidden_list:
             layers.append(nn.Linear(lastv, hidden))
-            layers.append(nn.ReLU())
+            if self.act:
+                layers.append(self.act)
             lastv = hidden
         layers.append(nn.Linear(lastv, out_dim))
         self.layers = nn.Sequential(*layers)
