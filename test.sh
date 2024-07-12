@@ -1,1 +1,0 @@
-python3 test.py --config ./configs/test/test-div2k-3.yaml --model ./save/_train_edsr-baseline-gaussian-batch32 --gpu 0
