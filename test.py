@@ -2,7 +2,6 @@ import argparse
 import os
 import math
 from functools import partial
-
 import yaml
 import torch
 from torch.utils.data import DataLoader
@@ -95,7 +94,7 @@ def eval_psnr(loader, model, data_norm=None, eval_type=None, eval_bsize=None,
             
             coord = batch['coord']
             cell = batch['cell']
-        
+
         if eval_bsize is None:
             with torch.no_grad():
                 pred = model(inp, batch['coord'], batch['scale'], batch['cell'])
@@ -129,4 +128,32 @@ def eval_psnr(loader, model, data_norm=None, eval_type=None, eval_bsize=None,
             pbar.set_description('val {:.4f}'.format(val_res.item()))
 
     return val_res.item()
-                  
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config')
+    parser.add_argument('--model')
+    parser.add_argument('--gpu', default='0')
+    args = parser.parse_args()
+
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+
+    with open(args.config, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+
+    spec = config['test_dataset']
+    dataset = datasets.make(spec['dataset'])
+    dataset = datasets.make(spec['wrapper'], args={'dataset': dataset})
+    loader = DataLoader(dataset, batch_size=spec['batch_size'],
+                        num_workers=8, pin_memory=True)
+
+    model_spec = torch.load(args.model)['model']
+    model = models.make(model_spec, load_sd=True).cuda()
+    with torch.no_grad():
+        res = eval_psnr(loader, model,
+                        data_norm=config.get('data_norm'),
+                        eval_type=config.get('eval_type'),
+                        eval_bsize=config.get('eval_bsize'),
+                        verbose=True)
+        print('result: {:.4f}'.format(res))
