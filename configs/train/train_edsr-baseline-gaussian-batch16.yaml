@@ -12,6 +12,7 @@ train_dataset:
       scale_max: 4
       augment: true
       sample_q: 2304
+      batch_per_gpu: 4
   batch_size: 16
 
 val_dataset:
@@ -41,7 +42,7 @@ model:
       name: edsr-baseline
       args:
         no_upsampling: true
-    fc_spec:
+    dec_spec:
       name: mlp
       args:
         out_dim: 3
