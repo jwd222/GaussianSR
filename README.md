@@ -6,23 +6,10 @@
 ![image](https://github.com/tljxyys/GaussianSR/blob/main/fig/Figure_2.png)
 ***
 ## 1. Environment
-- Python 3
-- Pytorch 1.6.0
-- TensorboardX
-- yaml, numpy, tqdm, imageio, einops
+- Python 3, Pytorch >= 1.6.0, TensorboardX, yaml, numpy, tqdm, imageio, einops
 
 ## 2. Running the code
 
-**0. Preliminaries**
-
-- For `train.py` or `test.py`, use `--gpu [GPU]` to specify the GPUs (e.g. `--gpu 0` or `--gpu 0,1`).
-
-- For `train.py`, by default, the save folder is at `save/_[CONFIG_NAME]`. We can use `--name` to specify a name if needed.
-
-- For dataset args in configs, `cache: in_memory` denotes pre-loading into memory (may require large memory, e.g. ~40GB for DIV2K), `cache: bin` denotes creating binary files (in a sibling folder) for the first time, `cache: none` denotes direct loading. We can modify it according to the hardware resources before running the training scripts.
-
-**1. DIV2K experiments**
-
 **Train**: `python train_gaussian.py --config configs/train/train_edsr-baseline-gaussian-batch16.yaml`. We use 4 V100 GPUs for training EDSR-baseline-LIIF.
 
-**Test**: `bash scripts/test-div2k.sh [MODEL_PATH] [GPU]` for div2k validation set, `bash scripts/test-benchmark.sh [MODEL_PATH] [GPU]` for benchmark datasets. `[MODEL_PATH]` is the path to a `.pth` file, we use `epoch-last.pth` in corresponding save folder.
+**Test**: `python test.py --config ./configs/test/test-div2k-2.yaml --model ./save/edsr-baseline-gaussiansr/epoch-last.pth` for div2k validation set, `python test.py --config ./configs/test/test-[benchmark]-2.yaml --model ./save/edsr-baseline-gaussiansr/epoch-last.pth` for benchmark datasets. We use a A100 GPU for testing.
