@@ -78,11 +78,51 @@ def fetching_features_from_tensor(image_tensor, input_coords):
     return color_values, coords
 
 
+def extract_patch(image, center, radius, padding_mode='constant'):
+    """
+    Extract a patch from an image with the specified center and radius.
+    Args:
+        image (torch.Tensor): Input image of shape [batch_size, channels, height, width].
+        center (tuple): Coordinates (y, x) of the patch center.
+        radius (int): Radius of the patch.
+        padding_mode (str, optional): Padding mode, can be 'constant', 'reflect', 'replicate', or 'circular'. Default is 'constant'.
+
+    Returns:
+        torch.Tensor: Extracted patch of shape [batch_size, channels, 2 * radius, 2 * radius].
+    """
+    height, width = image.shape[-2:]
+
+    # Convert center coordinates to integers
+    center_y, center_x = int(round(center[0])), int(round(center[1]))
+
+    # Calculate patch boundaries
+    top = center_y - radius
+    bottom = center_y + radius
+    left = center_x - radius
+    right = center_x + radius
+
+    # Check if boundaries are out of image bounds
+    top_padding = max(0, -top)
+    bottom_padding = max(0, bottom - height)
+    left_padding = max(0, -left)
+    right_padding = max(0, right - width)
+
+    # Pad the image
+    padded_image = torch.nn.functional.pad(image, (left_padding, right_padding, top_padding, bottom_padding),
+                                           mode=padding_mode)
+
+    # Extract the patch
+    patch = padded_image[..., top_padding:top_padding + 2 * radius, left_padding:left_padding + 2 * radius]
+
+    return patch
+
+
 @register('gaussian-splatter')
 class GaussianSplatter(nn.Module):
     """A module that applies 2D Gaussian splatting to input features."""
-    def __init__(self, encoder_spec, fc_spec, kernel_size, hidden_dim=256,
-                 unfold_row=7, unfold_column=7, num_points=100):
+
+    def __init__(self, encoder_spec, dec_spec, kernel_size, hidden_dim=256, unfold_row=7, unfold_column=7,
+                 num_points=100):
         """
         Initialize the 2D Gaussian Splatter module.
         Args:
@@ -92,14 +132,12 @@ class GaussianSplatter(nn.Module):
         """
         super(GaussianSplatter, self).__init__()
         self.encoder = models.make(encoder_spec)
-        self.feat, self.logits = None, None  # LR feature and LR logits
-        self.inp = None
-        self.feat_coord = None
+        self.feat, self.logits = None, None
+
         self.coef = nn.Conv2d(self.encoder.out_dim, hidden_dim, 3, padding=1)
         self.freq = nn.Conv2d(self.encoder.out_dim, hidden_dim, 3, padding=1)
-        self.phase = nn.Linear(2, hidden_dim//2, bias=False)
-        # Fully-connected layers
-        self.fc = models.make(fc_spec, args={'in_dim': hidden_dim})
+        self.phase = nn.Linear(2, hidden_dim // 2, bias=False)
+        self.dec = models.make(dec_spec, args={'in_dim': hidden_dim})
 
         # Key parameter in 2D Gaussian Splatter
         self.kernel_size = kernel_size
@@ -131,11 +169,7 @@ class GaussianSplatter(nn.Module):
                 - weighted_sigma_y (torch.Tensor): Tensor of shape [height * width] representing the weighted y-axis standard deviations.
                 - weighted_opacity (torch.Tensor): Tensor of shape [height * width] representing the weighted opacities.
         Description:
-            This function computes weighted Gaussian parameters based on the input tensor, logits, and the provided Gaussian kernel
-            parameters (sigma_x, sigma_y, and opacity). The logits tensor is used as a weight to compute a weighted sum of the Gaussian
-            kernel parameters for each spatial location (height and width) across the batch dimension. The resulting weighted parameters
-            are then averaged across the batch dimension, yielding tensors of shape [height * width] for the weighted sigma_x, sigma_y,
-            and opacity.
+            This function computes weighted Gaussian parameters based on the input tensor, logits, and the provided Gaussian kernel parameters (sigma_x, sigma_y, and opacity). The logits tensor is used as a weight to compute a weighted sum of the Gaussian kernel parameters for each spatial location (height and width) across the batch dimension. The resulting weighted parameters are then averaged across the batch dimension, yielding tensors of shape [height * width] for the weighted sigma_x, sigma_y, and opacity.
         """
         batch_size, num_classes, height, width = logits.size()
         logits = logits.permute(0, 2, 3, 1)  # Reshape logits to [batch, height, width, class]
@@ -173,7 +207,7 @@ class GaussianSplatter(nn.Module):
             torch.Tensor: The output features after Gaussian splatting, of the same shape as the input.
         """
         # 1. Get LR feature and logits
-        feat, lr_feat, logits = self.feat[:, :8, :, :], self.feat[:, 8:, :, :], self.logits  # channel decoupling
+        feat, lr_feat, logits = self.feat[:, :8, :, :], self.feat[:, 8:, :, :], self.logits  # Channel decoupling
         feat_size, feat_device = feat.shape, feat.device
 
         # 2. Calculate the high-resolution image size
@@ -207,8 +241,8 @@ class GaussianSplatter(nn.Module):
         # 5. Rasterization: Generating grid
         # 5.1. Spread Gaussian points over the whole feature map
         batch_size, channel, _, _ = unfold_feat.shape
-        weighted_sigma_x, weighted_sigma_y, weighted_opacity, weighted_rho = \
-            self.weighted_gaussian_parameters(unfold_logits)
+        weighted_sigma_x, weighted_sigma_y, weighted_opacity, weighted_rho = self.weighted_gaussian_parameters(
+            unfold_logits)
         sigma_x = weighted_sigma_x.view(num_LR_points, 1, 1)
         sigma_y = weighted_sigma_y.view(num_LR_points, 1, 1)
         rho = weighted_rho.view(num_LR_points, 1, 1)
@@ -217,7 +251,7 @@ class GaussianSplatter(nn.Module):
         covariance = torch.stack(
             [torch.stack([sigma_x ** 2 + 1e-5, rho * sigma_x * sigma_y], dim=-1),
              torch.stack([rho * sigma_x * sigma_y, sigma_y ** 2 + 1e-5], dim=-1)], dim=-2
-        )  # covariance matrix of Gaussian Distribution
+        )  # when correlation rou is set to zero, covariance will always be positive semi-definite
         inv_covariance = torch.inverse(covariance).to(feat_device)
 
         # 5.3. Choosing a broad range for the distribution [-5,5] to avoid any clipping
@@ -282,34 +316,34 @@ class GaussianSplatter(nn.Module):
         lr_feat = F.interpolate(lr_feat, size=(hr_h, hr_w), mode='bicubic', align_corners=False)
         final_image = torch.concat((final_image, lr_feat), dim=1)
 
-        # 8. Fourier space augmentation
+        # 8. Augmentation (Useful for improving out-of-distribution scale performance)
         coef = self.coef(final_image)
         freq = self.freq(final_image)
         feat_coord = self.feat_coord
         coord_ = coord.clone()
-        q_coef = F.grid_sample(coef, coord_.flip(-1).unsqueeze(1), mode='nearest',
-                               align_corners=False)[:, :, 0, :].permute(0, 2, 1)
-        q_freq = F.grid_sample(freq, coord_.flip(-1).unsqueeze(1), mode='nearest',
-                               align_corners=False)[:, :, 0, :].permute(0, 2, 1)
-        q_coord = F.grid_sample(feat_coord, coord_.flip(-1).unsqueeze(1), mode='nearest',
-                                align_corners=False)[:, :, 0, :].permute(0, 2, 1)
-        # calculate relative distance
+        q_coef = F.grid_sample(coef, coord_.flip(-1).unsqueeze(1), mode='nearest', align_corners=False)[:, :, 0, :] \
+            .permute(0, 2, 1)
+        q_freq = F.grid_sample(freq, coord_.flip(-1).unsqueeze(1), mode='nearest', align_corners=False)[:, :, 0, :] \
+            .permute(0, 2, 1)
+        q_coord = F.grid_sample(feat_coord, coord_.flip(-1).unsqueeze(1), mode='nearest', align_corners=False)[:, :, 0,
+                  :] \
+            .permute(0, 2, 1)
         rel_coord = coord - q_coord
         rel_coord[:, :, 0] *= feat.shape[-2]
         rel_coord[:, :, 1] *= feat.shape[-1]
-        # calculate cell size
         rel_cell = cell.clone()
         rel_cell[:, :, 0] *= feat.shape[-2]
         rel_cell[:, :, 1] *= feat.shape[-1]
-        # basis generation
         bs, q = coord.shape[:2]
         q_freq = torch.stack(torch.split(q_freq, 2, dim=-1), dim=-1)
         q_freq = torch.mul(q_freq, rel_coord.unsqueeze(-1))
         q_freq = torch.sum(q_freq, dim=-2)
         q_freq += self.phase(rel_cell.view((bs * q, -1))).view(bs, q, -1)
         q_freq = torch.cat((torch.cos(np.pi * q_freq), torch.sin(np.pi * q_freq)), dim=-1)
+
         inp = torch.mul(q_coef, q_freq)
-        pred = self.fc(inp.contiguous().view(bs * q, -1)).view(bs, q, -1)
+
+        pred = self.dec(inp.contiguous().view(bs * q, -1)).view(bs, q, -1)
 
         return pred
 
@@ -319,11 +353,9 @@ class GaussianSplatter(nn.Module):
 
 
 if __name__ == '__main__':
-    import encoder
-    import mlp
-    # A simple example of the forward process of GaussianSR
+    # A simple example of implementing class GaussianSplatter
     model = GaussianSplatter(encoder_spec={"name": "edsr-baseline", "args": {"no_upsampling": True}},
-                             fc_spec={"name": "mlp", "args": {"out_dim": 3, "hidden_list": [256, 256, 256, 256]}},
+                             dec_spec={"name": "mlp", "args": {"out_dim": 3, "hidden_list": [256, 256, 256, 256]}},
                              kernel_size=3)
     input = torch.rand(1, 3, 64, 64)
     sr_scale = 2
