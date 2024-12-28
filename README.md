@@ -13,3 +13,17 @@
 **Train**: `python train_gaussian.py --config configs/train/train_edsr-baseline-gaussian-batch16.yaml`. We use 4 V100 GPUs for training EDSR-baseline-LIIF.
 
 **Test**: `python test.py --config ./configs/test/test-div2k-2.yaml --model ./save/edsr-baseline-gaussiansr/epoch-last.pth` for div2k validation set, `python test.py --config ./configs/test/test-[benchmark]-2.yaml --model ./save/edsr-baseline-gaussiansr/epoch-last.pth` for benchmark datasets. We use a A100 GPU for testing.
+
+## Citation
+If you find the code helpful in your resarch or work, please cite our papers.
+`
+@misc{hu2024gaussiansrhighfidelity2d,
+      title={GaussianSR: High Fidelity 2D Gaussian Splatting for Arbitrary-Scale Image Super-Resolution}, 
+      author={Jintong Hu and Bin Xia and Bin Chen and Wenming Yang and Lei Zhang},
+      year={2024},
+      eprint={2407.18046},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2407.18046}, 
+}
+`
