@@ -16,7 +16,7 @@
 
 ## Citation
 If you find the code helpful in your resarch or work, please cite our papers.
-`
+```
 @misc{hu2024gaussiansrhighfidelity2d,
       title={GaussianSR: High Fidelity 2D Gaussian Splatting for Arbitrary-Scale Image Super-Resolution}, 
       author={Jintong Hu and Bin Xia and Bin Chen and Wenming Yang and Lei Zhang},
@@ -26,4 +26,4 @@ If you find the code helpful in your resarch or work, please cite our papers.
       primaryClass={cs.CV},
       url={https://arxiv.org/abs/2407.18046}, 
 }
-`
+```
