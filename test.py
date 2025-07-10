@@ -149,6 +149,9 @@ if __name__ == '__main__':
                         num_workers=8, pin_memory=True)
 
     model_spec = torch.load(args.model)['model']
+    ##########################
+    model_spec['args']['dec_spec'] = model_spec['args'].pop('fc_spec')
+    ##########################
     model = models.make(model_spec, load_sd=True).cuda()
     with torch.no_grad():
         res = eval_psnr(loader, model,

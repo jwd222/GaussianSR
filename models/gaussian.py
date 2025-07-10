@@ -137,7 +137,7 @@ class GaussianSplatter(nn.Module):
         self.coef = nn.Conv2d(self.encoder.out_dim, hidden_dim, 3, padding=1)
         self.freq = nn.Conv2d(self.encoder.out_dim, hidden_dim, 3, padding=1)
         self.phase = nn.Linear(2, hidden_dim // 2, bias=False)
-        self.dec = models.make(dec_spec, args={'in_dim': hidden_dim})
+        self.fc = models.make(dec_spec, args={'in_dim': hidden_dim})
 
         # Key parameter in 2D Gaussian Splatter
         self.kernel_size = kernel_size
@@ -343,7 +343,7 @@ class GaussianSplatter(nn.Module):
 
         inp = torch.mul(q_coef, q_freq)
 
-        pred = self.dec(inp.contiguous().view(bs * q, -1)).view(bs, q, -1)
+        pred = self.fc(inp.contiguous().view(bs * q, -1)).view(bs, q, -1)
 
         return pred
 
